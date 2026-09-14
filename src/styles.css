@@ -89,6 +89,7 @@ html, body {
   font-weight: 600;
   color: var(--muted);
 }
+.bin-actions { display: flex; align-items: baseline; gap: 4px; }
 
 .filelist {
   list-style: none;
@@ -190,6 +191,14 @@ button:focus-visible { outline: 2px solid var(--beat); outline-offset: 2px; }
   padding: 4px 9px;
 }
 .ghost:hover { background: var(--raised); }
+/* Clear all stays quiet, like a file row's ×, and turns red on hover. */
+.clear-all {
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  padding: 4px 6px;
+}
+.clear-all:hover:not(:disabled) { color: var(--danger); }
 .primary {
   background: var(--beat);
   color: #201704;
@@ -220,6 +229,8 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   padding: 14px 18px;
   border-bottom: 1px solid var(--hairline);
 }
+/* A long status wraps; the buttons beside it stay on one line. */
+.stage-actions button { white-space: nowrap; }
 .hint { color: var(--muted); font-size: 12px; margin-left: auto; }
 .hint.error { color: var(--danger); }
 

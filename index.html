@@ -20,7 +20,10 @@
         <section class="bin">
           <div class="bin-head">
             <h2>Audio</h2>
-            <button class="ghost" id="addAudio">Add music</button>
+            <div class="bin-actions">
+              <button class="clear-all" id="clearAudio" aria-label="Clear all songs" disabled>Clear all</button>
+              <button class="ghost" id="addAudio">Add music</button>
+            </div>
           </div>
           <ul class="filelist" id="audioList">
             <li class="empty">Add the song stems or full tracks. Beats are detected on drop.</li>
@@ -30,7 +33,10 @@
         <section class="bin">
           <div class="bin-head">
             <h2>Clips</h2>
-            <button class="ghost" id="addClips">Add clips</button>
+            <div class="bin-actions">
+              <button class="clear-all" id="clearClips" aria-label="Clear all clips" disabled>Clear all</button>
+              <button class="ghost" id="addClips">Add clips</button>
+            </div>
           </div>
           <ul class="filelist" id="clipList">
             <li class="empty">Add the video clips to draw from. Order doesn't matter.</li>
@@ -101,6 +107,7 @@
           <button class="primary" id="generate">Generate cut</button>
           <button class="secondary" id="export" disabled>Export for Premiere</button>
           <span class="hint" id="status"></span>
+          <button class="clear-all" id="clearAll" title="Remove all songs, clips and the cut" disabled>Clear all</button>
         </div>
 
         <div class="timeline" id="timeline">

@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { open, save } from "@tauri-apps/plugin-dialog";
+import { ask, open, save } from "@tauri-apps/plugin-dialog";
 
 // ------------------------------------------------------------------ state
 const state = {
@@ -7,6 +7,9 @@ const state = {
   clips: [], // { path, name, duration|null, fps, width, height, probing, error }
   timeline: null, // last generated Timeline from the backend
 };
+// Bumped when the audio bin is cleared, so an Add music batch still detecting
+// beats stops rather than adding the rest of its songs.
+let audioEpoch = 0;
 
 // Sequence rates a probed clip rate snaps to. Non-integer rates are NTSC: they
 // export as the rounded timebase with ntsc=TRUE.
@@ -42,7 +45,9 @@ $("addAudio").addEventListener("click", async () => {
   if (!picked) return;
   const paths = Array.isArray(picked) ? picked : [picked];
 
+  const epoch = audioEpoch;
   for (const path of paths) {
+    if (epoch !== audioEpoch) break; // the bin was cleared mid-batch
     const entry = { path, name: baseName(path), beats: [], strength: [], duration: null, tempo: null, working: true };
     state.audio.push(entry);
     renderAudioList();
@@ -54,7 +59,8 @@ $("addAudio").addEventListener("click", async () => {
       entry.duration = res.duration;
     } catch (e) {
       entry.error = String(e);
-      setStatus(`Beat detection failed for ${entry.name}`, true);
+      // A song removed before detection finished gets no error message.
+      if (state.audio.includes(entry)) setStatus(`Beat detection failed for ${entry.name}`, true);
     } finally {
       entry.working = false;
       renderAudioList();
@@ -73,6 +79,7 @@ function updateTempoReadout() {
 }
 
 function renderAudioList() {
+  updateClearButtons();
   const ul = $("audioList");
   if (!state.audio.length) {
     ul.innerHTML = `<li class="empty">Add the song stems or full tracks. Beats are detected on drop.</li>`;
@@ -104,15 +111,16 @@ $("addClips").addEventListener("click", async () => {
     state.clips.push(entry);
     renderClipList();
     // ffprobe gives the duration (required to place a clip) plus the frame rate
-    // and size that "Auto" reads from the first clip.
+    // and size that "Auto" reads from the first clip. A clip removed before
+    // ffprobe answers gets no status message.
     invoke("probe_media", { path })
       .then((info) => {
         Object.assign(entry, info);
-        if (!info.width) setStatus(`${entry.name} has no video. Songs go in Add music.`, true);
+        if (!info.width && state.clips.includes(entry)) setStatus(`${entry.name} has no video. Songs go in Add music.`, true);
       })
       .catch((e) => {
         entry.error = String(e);
-        setStatus(entry.error, true); // e.g. how to install ffprobe
+        if (state.clips.includes(entry)) setStatus(entry.error, true); // e.g. how to install ffprobe
       })
       .finally(() => {
         entry.probing = false;
@@ -123,6 +131,7 @@ $("addClips").addEventListener("click", async () => {
 });
 
 function renderClipList() {
+  updateClearButtons();
   const ul = $("clipList");
   if (!state.clips.length) {
     ul.innerHTML = `<li class="empty">Add the video clips to draw from. Order doesn't matter.</li>`;
@@ -145,7 +154,7 @@ function renderClipList() {
     .join("");
 }
 
-// Remove buttons in either bin. Changing the inputs invalidates the last cut.
+// Remove buttons in either bin.
 for (const id of ["audioList", "clipList"]) {
   $(id).addEventListener("click", (e) => {
     const btn = e.target.closest("button.remove");
@@ -154,15 +163,21 @@ for (const id of ["audioList", "clipList"]) {
     const [removed] = list.splice(Number(btn.dataset.index), 1);
     if (!removed) return;
     const hadCut = state.timeline !== null;
-    state.timeline = null;
-    $("export").disabled = true;
-    renderAudioList();
-    renderClipList();
-    renderTimeline();
-    updateTempoReadout();
-    updateAutoLabels();
+    refreshAfterRemoval();
     setStatus(`Removed ${removed.name}.${hadCut ? " Generate again to update the cut." : ""}`);
   });
+}
+
+// Taking files out of a bin invalidates the last cut; repaint everything that
+// reads the bins.
+function refreshAfterRemoval() {
+  state.timeline = null;
+  $("export").disabled = true;
+  renderAudioList();
+  renderClipList();
+  renderTimeline();
+  updateTempoReadout();
+  updateAutoLabels();
 }
 
 // "Auto" frame rate and resolution come from the first clip with readable video.
@@ -187,6 +202,49 @@ function updateAutoLabels() {
     ? `Auto — ${media.width} × ${media.height} (first clip)`
     : "Auto (from first clip)";
 }
+
+// ------------------------------------------------------------------ clear
+// "Clear all" in a bin empties that bin; the one above the timeline empties
+// both. The cut goes too; settings stay. Beat detection is slow to redo, so a
+// native dialog confirms first.
+const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
+// ["7 songs", "42 clips", "the cut"] → "7 songs, 42 clips and the cut"
+const joinList = (items) =>
+  items.slice(0, -1).join(", ") + (items.length > 1 ? " and " : "") + items[items.length - 1];
+
+// Each Clear all is live only while there's something to clear.
+function updateClearButtons() {
+  $("clearAudio").disabled = !state.audio.length;
+  $("clearClips").disabled = !state.clips.length;
+  $("clearAll").disabled = !state.audio.length && !state.clips.length;
+}
+
+async function clearBins({ audio = false, clips = false }) {
+  const items = [];
+  if (audio && state.audio.length) items.push(plural(state.audio.length, "song"));
+  if (clips && state.clips.length) items.push(plural(state.clips.length, "clip"));
+  if (!items.length) return;
+  if (state.timeline) items.push("the cut");
+  const what = joinList(items);
+  const confirmed = await ask(`Removes ${what}. This can't be undone.`, {
+    title: audio && clips ? "Clear all?" : audio ? "Clear all songs?" : "Clear all clips?",
+    kind: "warning",
+    okLabel: "Clear",
+    cancelLabel: "Cancel",
+  });
+  if (!confirmed) return;
+  if (audio) {
+    state.audio = [];
+    audioEpoch++;
+  }
+  if (clips) state.clips = [];
+  refreshAfterRemoval();
+  setStatus(`Cleared ${what}.`);
+}
+
+$("clearAudio").addEventListener("click", () => clearBins({ audio: true }));
+$("clearClips").addEventListener("click", () => clearBins({ clips: true }));
+$("clearAll").addEventListener("click", () => clearBins({ audio: true, clips: true }));
 
 // ------------------------------------------------------------------ generate
 function readSettings(media) {

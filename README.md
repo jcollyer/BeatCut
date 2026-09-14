@@ -103,7 +103,9 @@ In Premiere, use File ▸ Import on the exported `.xml`.
 - Add multiple songs; beats detected per song via madmom
 - Add clips; ffprobe measures duration, frame rate and size. Files without a
   video stream (e.g. a song added as a clip) are flagged and left out
-- Remove any added song or clip (×)
+- Remove any added song or clip (×). **Clear all** empties the Audio or Clips
+  bin; the one above the timeline clears songs, clips and the cut. Each asks
+  first
 - "Auto" frame rate and resolution from the first clip, with manual overrides
   (presets or a custom size)
 - Generate: seeded shuffle, clip ends trimmed back to a beat, contiguous video,

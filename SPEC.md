@@ -39,7 +39,7 @@ Validated:
 Not yet done / unverified:
 - No Rust tests yet (Phase 2).
 - No preview or light-edit UI beyond a static timeline render and removing
-  added files.
+  added files (one at a time, a whole bin, or everything).
 - Python sidecar assumes a local interpreter with madmom (not bundled).
 - Only tested on macOS; NTSC rates aren't validated in Premiere (Phase 4).
 
