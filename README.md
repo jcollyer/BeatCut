@@ -8,8 +8,9 @@ your media by file path, so it's tiny and fast.
 > **Early prototype.** It builds and runs with Tauri 2 + madmom, and its exports
 > import into Premiere Pro (checked at 30 and 25 fps). Only tested on macOS
 > (Apple Silicon). [SPEC.md](SPEC.md) is the authoritative spec and phased build
-> plan; Phase 0 (get it building and running) is done. The core logic
-> (`timeline.rs` + `fcp7xml.rs`) is validated against a Python mirror in `spec/`.
+> plan; Phases 0 (build and run) and 1 (frame rate and size from clips) are
+> done. The core logic (`timeline.rs` + `fcp7xml.rs`) is validated against a
+> Python mirror in `spec/`.
 
 ## The model (clip-driven)
 
@@ -56,7 +57,7 @@ slot-filling / randomization / frame-snapping logic) and
 
 - **Rust** (stable) + the [Tauri 2 prerequisites](https://v2.tauri.app/start/prerequisites/)
   for your OS (on macOS, the Xcode Command Line Tools).
-- **Node 18+**
+- **Node 20.19+ or 22.12+** (required by Vite 8)
 - **ffmpeg + ffprobe** on PATH — **required**. ffprobe measures clip durations
   (clips it can't measure are dropped), and madmom uses ffmpeg to decode
   non-WAV songs. On macOS: `brew install ffmpeg`.
@@ -100,15 +101,17 @@ In Premiere, use File ▸ Import on the exported `.xml`.
 
 **Working now**
 - Add multiple songs; beats detected per song via madmom
-- Add clips; durations via ffprobe
+- Add clips; ffprobe measures duration, frame rate and size. Files without a
+  video stream (e.g. a song added as a clip) are flagged and left out
+- Remove any added song or clip (×)
+- "Auto" frame rate and resolution from the first clip, with manual overrides
+  (presets or a custom size)
 - Generate: seeded shuffle, clip ends trimmed back to a beat, contiguous video,
   overruns push the next song, optional max clip length; re-roll = new seed
 - Timeline preview (audio blocks + beat ticks, video slots)
 - Export valid xmeml with per-file dedup; imports into Premiere Pro
 
 **Not done yet** (phases from [SPEC.md](SPEC.md) §9)
-- **Frame rate/resolution from the first clip** (Phase 1). Until then "Auto"
-  means 30 fps and sequences are always 1920×1080; pick the rate manually.
 - **Golden test in Rust** (Phase 2).
 - **Preview + light edits** — lock, replace one clip, thumbnails (Phase 3).
 - **Robustness** (Phase 4): NTSC round-trip validation (23.976/29.97 set the

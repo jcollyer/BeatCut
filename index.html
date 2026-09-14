@@ -47,9 +47,30 @@
               <option value="25">25</option>
               <option value="30">30</option>
               <option value="29.97">29.97</option>
+              <option value="50">50</option>
               <option value="60">60</option>
+              <option value="59.94">59.94</option>
             </select>
           </label>
+          <label class="field">
+            <span>Resolution</span>
+            <select id="resolution">
+              <option value="auto" selected>Auto (from first clip)</option>
+              <option value="3840x2160">3840 × 2160 (UHD)</option>
+              <option value="1920x1080">1920 × 1080 (HD)</option>
+              <option value="2160x3840">2160 × 3840 (vertical UHD)</option>
+              <option value="1080x1920">1080 × 1920 (vertical HD)</option>
+              <option value="custom">Custom…</option>
+            </select>
+          </label>
+          <div class="field" id="customResField" hidden>
+            <span>Width × height</span>
+            <span class="stepper">
+              <input type="number" id="resW" min="16" step="1" value="1920" aria-label="Width" />
+              <em>×</em>
+              <input type="number" id="resH" min="16" step="1" value="1080" aria-label="Height" />
+            </span>
+          </div>
           <label class="checkbox">
             <input type="checkbox" id="capOn" />
             <span>Cap clip length</span>

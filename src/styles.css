@@ -17,6 +17,9 @@
 
 * { box-sizing: border-box; }
 
+/* `hidden` must beat display rules like .field's flex, or toggled fields never hide. */
+[hidden] { display: none !important; }
+
 html, body {
   margin: 0;
   height: 100%;
@@ -120,11 +123,22 @@ html, body {
   white-space: nowrap;
 }
 .filelist .name {
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .filelist .working { color: var(--beat); }
+.filelist .remove {
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 1;
+  padding: 0 2px;
+}
+.filelist .remove:hover { color: var(--danger); }
 
 /* ---------- controls ---------- */
 .controls {

@@ -4,18 +4,28 @@ import { open, save } from "@tauri-apps/plugin-dialog";
 // ------------------------------------------------------------------ state
 const state = {
   audio: [], // { path, name, beats:[], duration, tempo }
-  clips: [], // { path, name, duration|null }
+  clips: [], // { path, name, duration|null, fps, width, height, probing, error }
   timeline: null, // last generated Timeline from the backend
 };
 
+// Sequence rates a probed clip rate snaps to. Non-integer rates are NTSC: they
+// export as the rounded timebase with ntsc=TRUE.
+const SEQUENCE_RATES = [23.976, 24, 25, 29.97, 30, 47.952, 48, 50, 59.94, 60, 100, 119.88, 120];
+// What "Auto" falls back to when no clip has readable video info.
+const FALLBACK = { rate: 30, width: 1920, height: 1080 };
+
 const $ = (id) => document.getElementById(id);
 const baseName = (p) => p.split(/[\\/]/).pop();
+const esc = (s) =>
+  String(s).replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[ch]);
 const fmtTime = (s) => {
   if (s == null) return "--:--";
   const m = Math.floor(s / 60);
   const sec = Math.floor(s % 60);
   return `${m}:${sec.toString().padStart(2, "0")}`;
 };
+const removeButton = (list, index, name) =>
+  `<button class="remove" type="button" data-list="${list}" data-index="${index}" aria-label="Remove ${esc(name)}" title="Remove">×</button>`;
 
 function setStatus(msg, isError = false) {
   const el = $("status");
@@ -68,13 +78,13 @@ function renderAudioList() {
     return;
   }
   ul.innerHTML = state.audio
-    .map((a) => {
+    .map((a, i) => {
       const right = a.working
         ? `<span class="tc working">detecting…</span>`
         : a.error
         ? `<span class="tc" style="color:var(--danger)">error</span>`
         : `<span class="tc">${a.beats.length} beats · ${fmtTime(a.duration)}</span>`;
-      return `<li><span class="name">${a.name}</span>${right}</li>`;
+      return `<li><span class="name">${esc(a.name)}</span>${right}${removeButton("audio", i, a.name)}</li>`;
     })
     .join("");
 }
@@ -89,16 +99,25 @@ $("addClips").addEventListener("click", async () => {
   const paths = Array.isArray(picked) ? picked : [picked];
 
   for (const path of paths) {
-    const entry = { path, name: baseName(path), duration: null };
+    const entry = { path, name: baseName(path), duration: null, probing: true };
     state.clips.push(entry);
     renderClipList();
-    // duration is best-effort (needs ffprobe); fine if it stays null
-    invoke("probe_duration", { path })
-      .then((d) => {
-        entry.duration = d;
-        renderClipList();
+    // ffprobe gives the duration (required to place a clip) plus the frame rate
+    // and size that "Auto" reads from the first clip.
+    invoke("probe_media", { path })
+      .then((info) => {
+        Object.assign(entry, info);
+        if (!info.width) setStatus(`${entry.name} has no video. Songs go in Add music.`, true);
       })
-      .catch(() => {});
+      .catch((e) => {
+        entry.error = String(e);
+        setStatus(entry.error, true); // e.g. how to install ffprobe
+      })
+      .finally(() => {
+        entry.probing = false;
+        renderClipList();
+        updateAutoLabels();
+      });
   }
 });
 
@@ -109,40 +128,104 @@ function renderClipList() {
     return;
   }
   ul.innerHTML = state.clips
-    .map(
-      (c) =>
-        `<li><span class="name">${c.name}</span><span class="tc">${
-          c.duration ? fmtTime(c.duration) : "—"
-        }</span></li>`
-    )
+    .map((c, i) => {
+      const right = c.probing
+        ? `<span class="tc working">measuring…</span>`
+        : c.error
+        ? `<span class="tc" style="color:var(--danger)">error</span>`
+        : !c.width
+        ? `<span class="tc" style="color:var(--danger)">no video</span>`
+        : `<span class="tc">${c.duration ? fmtTime(c.duration) : "—"}</span>`;
+      const tip = c.probing
+        ? ""
+        : c.error || (c.width ? `${c.width}×${c.height} · ${c.fps ? +c.fps.toFixed(3) : "?"} fps` : "No video stream. Songs go in Add music.");
+      return `<li title="${esc(tip)}"><span class="name">${esc(c.name)}</span>${right}${removeButton("clips", i, c.name)}</li>`;
+    })
     .join("");
 }
 
+// Remove buttons in either bin. Changing the inputs invalidates the last cut.
+for (const id of ["audioList", "clipList"]) {
+  $(id).addEventListener("click", (e) => {
+    const btn = e.target.closest("button.remove");
+    if (!btn) return;
+    const list = btn.dataset.list === "audio" ? state.audio : state.clips;
+    const [removed] = list.splice(Number(btn.dataset.index), 1);
+    if (!removed) return;
+    const hadCut = state.timeline !== null;
+    state.timeline = null;
+    $("export").disabled = true;
+    renderAudioList();
+    renderClipList();
+    renderTimeline();
+    updateTempoReadout();
+    updateAutoLabels();
+    setStatus(`Removed ${removed.name}.${hadCut ? " Generate again to update the cut." : ""}`);
+  });
+}
+
+// "Auto" frame rate and resolution come from the first clip with readable video.
+function firstClipMedia(clips = state.clips) {
+  return clips.find((c) => c.fps && c.width && c.height) || null;
+}
+
+function snapRate(fps) {
+  const nearest = SEQUENCE_RATES.reduce((a, b) => (Math.abs(b - fps) < Math.abs(a - fps) ? b : a));
+  return Math.abs(nearest - fps) < 0.05 ? nearest : Math.round(fps);
+}
+
+// 30 + ntsc → 29.97, for display.
+const rateLabel = ({ fps, ntsc }) => (ntsc ? +((fps * 1000) / 1001).toFixed(3) : fps);
+
+function updateAutoLabels() {
+  const media = firstClipMedia();
+  $("fps").querySelector('option[value="auto"]').textContent = media
+    ? `Auto — ${snapRate(media.fps)} fps (first clip)`
+    : "Auto (from first clip)";
+  $("resolution").querySelector('option[value="auto"]').textContent = media
+    ? `Auto — ${media.width} × ${media.height} (first clip)`
+    : "Auto (from first clip)";
+}
+
 // ------------------------------------------------------------------ generate
-function readSettings() {
+function readSettings(media) {
   const fpsSel = $("fps").value;
-  let fps = 30;
-  let ntsc = false;
-  if (fpsSel === "auto") {
-    // TODO(ui phase): probe fps + resolution from the first clip via ffprobe.
-    fps = 30;
-    ntsc = false;
+  const rate = fpsSel === "auto" ? (media ? snapRate(media.fps) : FALLBACK.rate) : parseFloat(fpsSel);
+
+  let width;
+  let height;
+  const resSel = $("resolution").value;
+  if (resSel === "auto") {
+    ({ width, height } = media || FALLBACK);
+  } else if (resSel === "custom") {
+    width = Math.max(16, parseInt($("resW").value, 10) || FALLBACK.width);
+    height = Math.max(16, parseInt($("resH").value, 10) || FALLBACK.height);
   } else {
-    const raw = parseFloat(fpsSel);
-    ntsc = !Number.isInteger(raw); // 23.976 / 29.97 → ntsc
-    fps = Math.round(raw);
+    [width, height] = resSel.split("x").map(Number);
   }
+
   const seedVal = $("seed").value.trim();
   const capOn = $("capOn").checked;
   return {
-    fps,
-    ntsc,
-    width: 1920, // TODO(ui phase): auto from first clip
-    height: 1080,
+    fps: Math.round(rate),
+    ntsc: !Number.isInteger(rate), // 23.976 / 29.97 / 59.94 → ntsc
+    width,
+    height,
     seed: seedVal ? Number(seedVal) : null,
     maxClipSecs: capOn ? Math.max(1, parseFloat($("maxClip").value) || 12) : null,
   };
 }
+
+// Custom resolution reveals width/height inputs, seeded from the first clip.
+$("resolution").addEventListener("change", () => {
+  const custom = $("resolution").value === "custom";
+  $("customResField").hidden = !custom;
+  const media = firstClipMedia();
+  if (custom && media) {
+    $("resW").value = media.width;
+    $("resH").value = media.height;
+  }
+});
 
 // cap toggle shows/hides the seconds field
 $("capOn").addEventListener("change", () => {
@@ -160,17 +243,29 @@ $("generate").addEventListener("click", async () => {
     setStatus("Still detecting beats — hang on a sec.", true);
     return;
   }
+  if (state.clips.some((c) => c.probing)) {
+    setStatus("Still measuring clips — hang on a sec.", true);
+    return;
+  }
   if (!state.audio.length || !state.clips.length) {
     setStatus("Add at least one song and one clip.", true);
     return;
   }
 
-  // Clip duration is essential in this model. Drop clips we couldn't measure
-  // and tell the user (they likely need ffprobe on PATH).
-  const usable = state.clips.filter((c) => typeof c.duration === "number" && c.duration > 0);
-  const unmeasured = state.clips.length - usable.length;
+  // A clip needs a duration (ffprobe) and a video stream. Drop the rest and
+  // say why: no duration usually means ffprobe is missing; no video usually
+  // means a song went into the clips bin.
+  const measured = state.clips.filter((c) => typeof c.duration === "number" && c.duration > 0);
+  const usable = measured.filter((c) => c.width);
+  const unmeasured = state.clips.length - measured.length;
+  const noVideo = measured.length - usable.length;
   if (!usable.length) {
-    setStatus("No clip durations — install ffmpeg/ffprobe so clips can be measured.", true);
+    setStatus(
+      noVideo
+        ? "None of the clips have video. Songs go in Add music, footage in Add clips."
+        : "No clip durations — install ffmpeg/ffprobe so clips can be measured.",
+      true
+    );
     return;
   }
 
@@ -180,9 +275,11 @@ $("generate").addEventListener("click", async () => {
     duration: a.duration || (a.beats.length ? a.beats[a.beats.length - 1] : 0),
   }));
   const clips = usable.map((c) => ({ path: c.path, duration: c.duration }));
+  const media = firstClipMedia(usable);
+  const settings = readSettings(media);
 
   try {
-    const timeline = await invoke("generate_timeline", { songs, clips, settings: readSettings() });
+    const timeline = await invoke("generate_timeline", { songs, clips, settings });
     state.timeline = timeline;
     renderTimeline();
     $("export").disabled = false;
@@ -190,6 +287,8 @@ $("generate").addEventListener("click", async () => {
     let msg = `${timeline.video.length} clips placed.`;
     if (unused.length) msg += ` ${unused.length} didn't fit: ${unused.join(", ")}.`;
     if (unmeasured) msg += ` (${unmeasured} clip(s) skipped — no duration.)`;
+    if (noVideo) msg += ` (${noVideo} file(s) skipped — no video.)`;
+    msg += ` Sequence: ${rateLabel(settings)} fps, ${settings.width}×${settings.height}.`;
     setStatus(msg);
     firePulse();
   } catch (e) {

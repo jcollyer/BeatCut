@@ -22,35 +22,40 @@ Primary loop: **add songs → add clips → Generate → preview → re-roll unt
 
 ## 2. Current status (what's in this repo)
 
-A **scaffold exists but has not been compiled or run end-to-end.** Treat Rust
-and Tauri config as reference wiring, not a working build.
+**Phases 0 and 1 are done** (2026-09-14): the app builds and runs with
+`npm run tauri dev` (tested on macOS), and its exports import into Premiere.
 
 Validated:
 - The core algorithm (`src-tauri/src/timeline.rs`) and the XML renderer
   (`src-tauri/src/fcp7xml.rs`) are mirrored in `spec/golden_reference.py`, run on
   fixed sample data, and produce **well-formed xmeml** that imports into Premiere
   cleanly. See `spec/beatcut-sample.golden.xml` and §5.4.
+- On real exports (7 songs, ~60 clips, 25 and 30 fps) the app's XML is
+  byte-identical to the Python mirror's for the same clip order, except where the
+  mirror's `round()` breaks exact half-frame ties differently from Rust.
+- "Auto" frame rate and resolution come from the first clip via ffprobe
+  (rotation applied, cover art ignored), with manual overrides for both.
 
 Not yet done / unverified:
-- Never built with `cargo`/`npm` — Tauri 2 boilerplate (capabilities schema,
-  plugin permission strings, icons, lockfiles) needs to be made real (Phase 0).
-- fps/resolution auto-detect is placeholdered (30 / 1920×1080).
-- No preview or light-edit UI beyond a static timeline render.
+- No Rust tests yet (Phase 2).
+- No preview or light-edit UI beyond a static timeline render and removing
+  added files.
 - Python sidecar assumes a local interpreter with madmom (not bundled).
+- Only tested on macOS; NTSC rates aren't validated in Premiere (Phase 4).
 
 ---
 
 ## 3. Tech stack & key constraints
 
 - **Shell:** Tauri 2 (Rust backend + webview frontend).
-- **Frontend:** Vite + vanilla JS (no framework). Keep it dependency-light.
+- **Frontend:** Vite 8 + vanilla JS (no framework). Keep it dependency-light.
 - **Backend:** Rust. Crates: `tauri` 2, `tauri-plugin-dialog` 2, `serde`,
   `serde_json`, `rand` 0.8.
 - **Beat detection:** Python **madmom** sidecar, invoked via
   `std::process::Command`. Script is embedded with `include_str!` and written to
   a temp file at startup, so it doesn't depend on the working directory.
-- **Media probing:** **ffprobe** (from ffmpeg) for clip duration — now
-  **required** (see §5). Extend it to also report fps + dimensions (Phase 1).
+- **Media probing:** **ffprobe** (from ffmpeg) — **required** (see §5). Reports
+  each clip's duration, frame rate and display size (`probe_media`, §6).
 - **Interchange format:** **FCP7 XML / xmeml v5**, extension `.xml`. This is what
   Premiere imports (File ▸ Import). Do **not** target `.fcpxml` — that is modern
   Final Cut and Premiere cannot read it. The two are incompatible despite the
@@ -191,9 +196,15 @@ output are **integer frames**; all inputs are **seconds (f64)**.
 | Command | JS args | Returns |
 |---|---|---|
 | `detect_beats_cmd` | `{ audioPath }` | `BeatResult { beats:[f64], tempo:f64?, duration:f64? }` |
-| `probe_duration` | `{ path }` | `f64?` (Phase 1: extend to media info — see §9) |
+| `probe_media` | `{ path }` | `MediaInfo { duration:f64?, fps:f64?, width:u32?, height:u32? }` / error string |
 | `generate_timeline` | `{ songs, clips, settings }` | `Timeline` |
 | `export_xml` | `{ timeline, outPath, sequenceName }` | `()` / error string |
+
+`MediaInfo` comes from ffprobe (it replaced `probe_duration` in Phase 1). `fps`
+is the measured rate (e.g. 29.97002997); `width`/`height` are the display size,
+with rotation metadata applied; the video fields are null for files without a
+video stream. Errors are user-facing text — a missing ffprobe says how to
+install it. The frontend snaps `fps` to a standard sequence rate for "Auto".
 
 ### Inputs
 

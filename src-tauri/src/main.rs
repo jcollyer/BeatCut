@@ -5,7 +5,7 @@ mod beats;
 mod fcp7xml;
 mod timeline;
 
-use beats::BeatResult;
+use beats::{BeatResult, MediaInfo};
 use std::fs;
 use std::sync::OnceLock;
 use timeline::{ClipInput, GenerateSettings, SongInput, Timeline};
@@ -41,8 +41,8 @@ fn detect_beats_cmd(audio_path: String) -> Result<BeatResult, String> {
 }
 
 #[tauri::command(async)]
-fn probe_duration(path: String) -> Option<f64> {
-    beats::probe_duration(&path)
+fn probe_media(path: String) -> Result<MediaInfo, String> {
+    beats::probe_media(&path)
 }
 
 #[tauri::command]
@@ -65,7 +65,7 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             detect_beats_cmd,
-            probe_duration,
+            probe_media,
             generate_timeline,
             export_xml
         ])
