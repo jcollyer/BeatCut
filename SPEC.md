@@ -1,0 +1,342 @@
+# BeatCut — Build Spec & Hand-off
+
+Hand-off document for continuing this project in Claude Code. It is the
+authoritative description of the agreed behaviour. Where this document and the
+current code disagree, **this document wins** — fix the code.
+
+---
+
+## 1. What we're building
+
+A desktop app that automates a beat-synced drone-footage montage. The user
+drops in several songs and many video clips; the app shuffles the clips, lays
+them end-to-end over the songs, trims each clip's end to a nearby beat so cuts
+land musically, and exports a **Final Cut Pro 7 XML (xmeml)** rough cut that the
+user finishes in Adobe Premiere Pro. The app never renders or copies media — the
+XML only references files by path, so it's fast and light.
+
+Primary loop: **add songs → add clips → Generate → preview → re-roll until happy
+→ Export → finish in Premiere.**
+
+---
+
+## 2. Current status (what's in this repo)
+
+A **scaffold exists but has not been compiled or run end-to-end.** Treat Rust
+and Tauri config as reference wiring, not a working build.
+
+Validated:
+- The core algorithm (`src-tauri/src/timeline.rs`) and the XML renderer
+  (`src-tauri/src/fcp7xml.rs`) are mirrored in `spec/golden_reference.py`, run on
+  fixed sample data, and produce **well-formed xmeml** that imports into Premiere
+  cleanly. See `spec/beatcut-sample.golden.xml` and §5.4.
+
+Not yet done / unverified:
+- Never built with `cargo`/`npm` — Tauri 2 boilerplate (capabilities schema,
+  plugin permission strings, icons, lockfiles) needs to be made real (Phase 0).
+- fps/resolution auto-detect is placeholdered (30 / 1920×1080).
+- No preview or light-edit UI beyond a static timeline render.
+- Python sidecar assumes a local interpreter with madmom (not bundled).
+
+---
+
+## 3. Tech stack & key constraints
+
+- **Shell:** Tauri 2 (Rust backend + webview frontend).
+- **Frontend:** Vite + vanilla JS (no framework). Keep it dependency-light.
+- **Backend:** Rust. Crates: `tauri` 2, `tauri-plugin-dialog` 2, `serde`,
+  `serde_json`, `rand` 0.8.
+- **Beat detection:** Python **madmom** sidecar, invoked via
+  `std::process::Command`. Script is embedded with `include_str!` and written to
+  a temp file at startup, so it doesn't depend on the working directory.
+- **Media probing:** **ffprobe** (from ffmpeg) for clip duration — now
+  **required** (see §5). Extend it to also report fps + dimensions (Phase 1).
+- **Interchange format:** **FCP7 XML / xmeml v5**, extension `.xml`. This is what
+  Premiere imports (File ▸ Import). Do **not** target `.fcpxml` — that is modern
+  Final Cut and Premiere cannot read it. The two are incompatible despite the
+  shared "Final Cut XML" name.
+
+> ⚠️ Version check: exact Tauri 2 plugin/permission strings and the capabilities
+> schema move between minor versions. Verify against current Tauri docs when
+> standing up Phase 0 rather than trusting the committed config verbatim.
+
+---
+
+## 4. Repository layout
+
+```
+beatcut/
+├── SPEC.md                         ← this file
+├── README.md                       ← setup / run instructions
+├── index.html                      ← UI structure
+├── package.json / vite.config.js
+├── src/
+│   ├── main.js                     ← file picking, IPC, timeline render
+│   └── styles.css                  ← dark editing-console theme
+├── src-tauri/
+│   ├── Cargo.toml / build.rs / tauri.conf.json
+│   ├── capabilities/default.json
+│   ├── python/detect_beats.py      ← madmom sidecar
+│   └── src/
+│       ├── main.rs                 ← Tauri commands
+│       ├── beats.rs                ← run sidecar + ffprobe
+│       ├── timeline.rs             ← CORE placement algorithm
+│       └── fcp7xml.rs              ← xmeml renderer
+└── spec/
+    ├── golden_reference.py         ← Python mirror = test oracle
+    └── beatcut-sample.golden.xml   ← validated expected output
+```
+
+The two files to protect the behaviour of: **`timeline.rs`** (placement) and
+**`fcp7xml.rs`** (export). Everything else serves them.
+
+---
+
+## 5. The core model (authoritative)
+
+### 5.1 Definitions
+
+- **Timeline** runs left to right in seconds, snapped to whole frames on output.
+- **Song**: an audio file with beats (seconds, relative to the song's own start)
+  and a duration. Songs play in program order; song 0 starts at t = 0.
+- **Clip**: a video file with a known duration. Each clip is used **at most
+  once**.
+- **Natural end** of a clip placed at time `t` = `t + effective_length`, where
+  effective length is the clip's duration, optionally capped (§5.2).
+
+### 5.2 Algorithm
+
+1. **Shuffle** clip order with a seeded RNG. A "re-roll" is simply a new seed.
+2. Enter song 0 at `song_start = 0`. Record its audio item. Set `t = 0`.
+3. For each clip in shuffled order, while songs remain:
+   a. **Contiguous advance:** if `t >= current_song_end`, advance to the next
+      song with `song_start = t` (no gap) and record its audio item. If there is
+      no next song, **stop**.
+   b. `effective_length = min(duration, maxClipSecs)` if a cap is set, else
+      `duration`. `natural_end = t + effective_length`.
+   c. **If `natural_end <= current_song_end`** (ends inside the song):
+      trim the end to the **largest beat that is `> t` and `<= natural_end`**
+      (least possible trim, lands on a beat). If no such beat exists (clip
+      shorter than the gap to the next beat), use `natural_end` unsnapped.
+   d. **Else (overrun):** the clip plays its **full** length (unsnapped — there
+      are no beats in the silence it runs into). `clip_end = natural_end`.
+   e. Emit a video slot `[frame(t), frame(clip_end)]`, `in = 0`,
+      `out = length`. Set `t = clip_end`.
+   f. **If it overran:** push the next song to start at `clip_end` (this opens a
+      silent gap on the audio track) and record its audio item. If it was the
+      **last** song, **stop** (the final clip plays out over silence).
+4. **Stop** when clips run out or songs run out. Any clips not placed are
+   reported as **unused** (by filename).
+
+**Frame snapping:** `frame(sec) = round(sec * fps)`. Video stays contiguous
+because each clip's end time is literally the next clip's start time — the same
+float rounds identically, so `frame(end_i) == frame(start_{i+1})`.
+
+### 5.3 Edge cases (all confirmed with the user)
+
+| Situation | Behaviour |
+|---|---|
+| Video track | **Always contiguous — never a gap between clips.** |
+| Audio track | Gaps (silence) between songs are **allowed**. |
+| Clip ends inside a song | End trims to nearest beat **at or before** natural end. |
+| Snap granularity | **Beats only**, not bars (bar-snapping would trim more, fighting "max use"). |
+| Clip overruns a song | Plays **full length, unsnapped**; next song pushed to clip end. |
+| Overrun on the **last** song | Plays out over silence, then stop. |
+| Clip shorter than one beat gap | Use natural end unsnapped (rare for 7–60 s clips). |
+| Sub-frame clip (`frame(end) <= frame(start)`) | Skip it; counts as unused. |
+| More clips than fit | Extra clips ignored; report **count + filenames**. |
+| Fewer clips than audio | Stop when clips run out (trailing audio has no video). |
+| In-point | Always 0 — clips play from their start. |
+| Transitions | Hard cuts only. |
+| Max clip length | Optional cap; off by default (keep clips full). |
+
+### 5.4 Worked example (the golden fixture)
+
+Sample data: 2 songs (A = 12.0 s, B = 10.0 s, beats every 0.5 s), 8 clips, fps
+30. Fixed (non-random) clip order for determinism. This is exactly
+`spec/beatcut-sample.golden.xml`.
+
+```
+VIDEO (contiguous, frames @30):
+    0 -> 90    cliff_pan.mp4       (3.3s trimmed to beat 3.0s)
+   90 -> 255   coastline.mp4       (natural 8.8s -> beat 8.5s)
+  255 -> 315   forest rise.mp4     (natural 10.7s -> beat 10.5s)  [name has a space]
+  315 -> 450   river_bend.mp4      (natural 15.0s > song A end 12.0s -> OVERRUN, full)
+  450 -> 540   city_dusk.mp4       (in song B; natural 18.1s -> beat 18.0s)
+  540 -> 735   mountain_ridge.mp4  (natural 24.7s -> beat 24.5s)
+  735 -> 885   desert_dunes.mp4    (natural 29.5s > song B end 25.0s -> OVERRUN last, plays out)
+AUDIO (gap allowed):
+    0 -> 360   track_A.wav
+  450 -> 750   track_B.wav         (pushed from 360 by river_bend's overrun -> silence 360..450)
+UNUSED: harbor_lights.mp4          (audio ran out)
+TOTAL: 885 frames (29.5 s)
+```
+
+**The Rust output must match `beatcut-sample.golden.xml` byte-for-byte** when fed
+this data with shuffling disabled. Regenerate the golden file with
+`python3 spec/golden_reference.py`.
+
+---
+
+## 6. Data contracts (frontend ⇄ backend)
+
+Tauri maps top-level command argument names camelCase (JS) → snake_case (Rust)
+automatically. Struct **fields** are plain serde: `GenerateSettings` uses
+`#[serde(rename_all = "camelCase")]` so JS sends camelCase; all other structs
+use snake_case field names on both sides. All time values in the `Timeline`
+output are **integer frames**; all inputs are **seconds (f64)**.
+
+### Commands (`src-tauri/src/main.rs`)
+
+| Command | JS args | Returns |
+|---|---|---|
+| `detect_beats_cmd` | `{ audioPath }` | `BeatResult { beats:[f64], tempo:f64?, duration:f64? }` |
+| `probe_duration` | `{ path }` | `f64?` (Phase 1: extend to media info — see §9) |
+| `generate_timeline` | `{ songs, clips, settings }` | `Timeline` |
+| `export_xml` | `{ timeline, outPath, sequenceName }` | `()` / error string |
+
+### Inputs
+
+```
+SongInput   { path: string, beats: f64[] (sec, rel. to song start), duration: f64 (sec) }
+ClipInput   { path: string, duration: f64 (sec, REQUIRED) }
+GenerateSettings {   // camelCase over IPC
+  fps: u32,
+  ntsc: bool,        // true for 23.976 / 29.97 / 59.94
+  width: u32,
+  height: u32,
+  seed: u64 | null,           // #[serde(default)]
+  maxClipSecs: f64 | null,    // #[serde(default)]; null = no cap
+}
+```
+
+### Output
+
+```
+Timeline {
+  fps, ntsc, width, height,
+  total_frames: i64,
+  audio: AudioItem[],
+  video: VideoSlot[],
+  unused_clips: string[],     // filenames
+}
+AudioItem / VideoSlot { path, start, end, in_frame, out_frame }   // all frames
+```
+
+Clip duration is **essential** (we can't place a clip without its length). The
+frontend must drop clips it couldn't measure and tell the user (they likely need
+ffprobe on PATH).
+
+---
+
+## 7. XML output contract
+
+Format: `xmeml` version 5, `<!DOCTYPE xmeml>`. Structure per clip item:
+`name`, `duration`, `rate` (`timebase` + `ntsc`), `start`, `end`, `in`, `out`,
+`file`. Sequence carries `rate` and video `samplecharacteristics`
+(`width`/`height`/`rate`).
+
+Rules the renderer already follows and must keep:
+- **File dedup:** each unique media path gets one full `<file id="file-N">` on
+  first appearance; later uses are `<file id="file-N"/>` references. IDs are
+  assigned in document order (video first, then audio).
+- **pathurl:** `file://localhost/<absolute-path>`, spaces `%20`-encoded, XML-
+  escaped. ⚠️ Current encoding is minimal — Phase 4 must make it correct across
+  OSes (Windows drive letters, full percent-encoding).
+- **Frames are integers.** NTSC rates set `<ntsc>TRUE</ntsc>` with the rounded
+  integer timebase (e.g. 30 for 29.97). Integer-fps path is validated; **NTSC
+  needs a real Premiere round-trip test** (Phase 4).
+- All names/paths pass through XML escaping.
+
+---
+
+## 8. Settled decisions
+
+Clip-driven placement · contiguous video · seeded re-roll · each clip once ·
+trim end to nearest beat at/before natural end · beats not bars · overrun pushes
+next song, silent audio gaps allowed, last clip plays out · in-point always 0 ·
+hard cuts · optional max-clip cap (off by default) · auto fps/res from first clip
+with manual override · unused clips reported by count + name.
+
+---
+
+## 9. Build plan (phased, with acceptance criteria)
+
+### Phase 0 — Stand up the scaffold (do this first)
+Make it actually build and run. Fix Tauri 2 boilerplate: capabilities/permission
+strings, icons, lockfiles, plugin registration. Wire the dialog plugin on both
+Rust and JS sides.
+- **Accept:** `npm run tauri dev` launches the window; adding a song runs beat
+  detection and shows a beat count; adding a clip shows its duration; Generate
+  produces slots; Export writes an `.xml`.
+
+### Phase 1 — Media probe (fps + resolution)
+Extend `probe_duration` into a `probe_media` command returning
+`{ duration, fps, width, height }` via ffprobe. Use the **first clip** to fill
+the "Auto" frame-rate and sequence resolution (currently hard-coded 30 /
+1920×1080 in `readSettings`). Manual override stays.
+- **Accept:** with "Auto" selected, the exported sequence rate and dimensions
+  match the first clip; missing ffprobe surfaces a clear, actionable message.
+
+### Phase 2 — Golden test in Rust
+Port `spec/golden_reference.py`'s fixture into a Rust test that builds the
+timeline with shuffling disabled and asserts the XML equals
+`spec/beatcut-sample.golden.xml`.
+- **Accept:** `cargo test` passes; changing the algorithm breaks the test.
+
+### Phase 3 — Preview + light edits
+Visual timeline (already partly there) plus: **re-roll all**, **replace one
+clip** (swap a single slot for another unused/used clip, keeping timing),
+**lock** clips (a re-roll keeps locked slots in place), and **clip thumbnails**
+(extract a frame via ffmpeg). No in-app A/V playback — the watch-through happens
+in Premiere.
+- **Accept:** user can re-roll, lock a slot and re-roll without it moving,
+  replace a single clip, and see thumbnails; Export reflects edits.
+
+### Phase 4 — Robustness
+Cross-OS `file://` URLs; NTSC round-trip validation in Premiere; add media
+characteristics to `<file>` to cut down relink prompts; bundle Python as a
+frozen sidecar (PyInstaller) so users don't need a venv; graceful errors
+throughout.
+- **Accept:** exports import without manual relinking when media is in place; a
+  packaged build runs on a machine with no Python installed.
+
+### Phase 5 — Package & distribute
+Icons, app metadata, signed builds for the target OS(es).
+
+---
+
+## 10. Risks & gotchas
+
+- **madmom install is fussy** about numpy/scipy. Pin `numpy<2` in the venv. Point
+  the app at the interpreter with `BEATCUT_PYTHON`. Long-term: bundle it (Phase 4).
+- **NTSC / rational time.** xmeml stores integer frames + timebase + ntsc flag,
+  so the integer path is clean, but 23.976/29.97 need a real import test. If
+  drift appears, consider modelling time as exact fractions like the
+  `@chatoctopus/timeline` library does.
+- **file:// paths across OSes** — the current encoder is minimal (Phase 4).
+- **Beat detection latency** — madmom is not instant on long tracks; detect once
+  per song and cache. Consider `DBNDownBeatTrackingProcessor` later if the user
+  ever wants a bar-feel option (not in scope now).
+- **Tauri 2 API churn** — verify plugin/permission specifics against live docs.
+
+---
+
+## 11. Testing
+
+- **Golden fixture** (§5.4, Phase 2) is the primary guard on placement + XML.
+- **Manual Premiere import** after each meaningful change: File ▸ Import the
+  exported `.xml`, confirm contiguous video, on-beat cuts, correct audio gaps.
+- **Unit-test the tricky bits** of `timeline.rs` in isolation: overrun push,
+  last-song play-out, contiguous advance, unused reporting, sub-frame skip.
+
+---
+
+## 12. Still needs a human decision (minor)
+
+- **Replace-one-clip source:** when the user replaces a single slot, should the
+  replacement come only from currently-unused clips, or may it reuse a placed
+  clip? (Affects the "each clip once" invariant during manual edits.)
+- **Thumbnail count:** one frame per slot, or a few across the slot?
+
+Neither blocks Phases 0–2.

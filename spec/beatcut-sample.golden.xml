@@ -1,0 +1,239 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE xmeml>
+<xmeml version="5">
+  <sequence>
+    <name>BeatCut rough cut</name>
+    <duration>885</duration>
+    <rate>
+      <timebase>30</timebase>
+      <ntsc>FALSE</ntsc>
+    </rate>
+    <media>
+      <video>
+        <format>
+          <samplecharacteristics>
+            <rate>
+              <timebase>30</timebase>
+              <ntsc>FALSE</ntsc>
+            </rate>
+            <width>1920</width>
+            <height>1080</height>
+          </samplecharacteristics>
+        </format>
+        <track>
+          <clipitem id="clipitem-0">
+            <name>cliff_pan.mp4</name>
+            <duration>90</duration>
+            <rate>
+              <timebase>30</timebase>
+              <ntsc>FALSE</ntsc>
+            </rate>
+            <start>0</start>
+            <end>90</end>
+            <in>0</in>
+            <out>90</out>
+            <file id="file-0">
+              <name>cliff_pan.mp4</name>
+              <pathurl>file://localhost/media/drone/cliff_pan.mp4</pathurl>
+              <rate>
+                <timebase>30</timebase>
+                <ntsc>FALSE</ntsc>
+              </rate>
+              <media>
+                <video/>
+              </media>
+            </file>
+          </clipitem>
+          <clipitem id="clipitem-1">
+            <name>coastline.mp4</name>
+            <duration>165</duration>
+            <rate>
+              <timebase>30</timebase>
+              <ntsc>FALSE</ntsc>
+            </rate>
+            <start>90</start>
+            <end>255</end>
+            <in>0</in>
+            <out>165</out>
+            <file id="file-1">
+              <name>coastline.mp4</name>
+              <pathurl>file://localhost/media/drone/coastline.mp4</pathurl>
+              <rate>
+                <timebase>30</timebase>
+                <ntsc>FALSE</ntsc>
+              </rate>
+              <media>
+                <video/>
+              </media>
+            </file>
+          </clipitem>
+          <clipitem id="clipitem-2">
+            <name>forest rise.mp4</name>
+            <duration>60</duration>
+            <rate>
+              <timebase>30</timebase>
+              <ntsc>FALSE</ntsc>
+            </rate>
+            <start>255</start>
+            <end>315</end>
+            <in>0</in>
+            <out>60</out>
+            <file id="file-2">
+              <name>forest rise.mp4</name>
+              <pathurl>file://localhost/media/drone/forest%20rise.mp4</pathurl>
+              <rate>
+                <timebase>30</timebase>
+                <ntsc>FALSE</ntsc>
+              </rate>
+              <media>
+                <video/>
+              </media>
+            </file>
+          </clipitem>
+          <clipitem id="clipitem-3">
+            <name>river_bend.mp4</name>
+            <duration>135</duration>
+            <rate>
+              <timebase>30</timebase>
+              <ntsc>FALSE</ntsc>
+            </rate>
+            <start>315</start>
+            <end>450</end>
+            <in>0</in>
+            <out>135</out>
+            <file id="file-3">
+              <name>river_bend.mp4</name>
+              <pathurl>file://localhost/media/drone/river_bend.mp4</pathurl>
+              <rate>
+                <timebase>30</timebase>
+                <ntsc>FALSE</ntsc>
+              </rate>
+              <media>
+                <video/>
+              </media>
+            </file>
+          </clipitem>
+          <clipitem id="clipitem-4">
+            <name>city_dusk.mp4</name>
+            <duration>90</duration>
+            <rate>
+              <timebase>30</timebase>
+              <ntsc>FALSE</ntsc>
+            </rate>
+            <start>450</start>
+            <end>540</end>
+            <in>0</in>
+            <out>90</out>
+            <file id="file-4">
+              <name>city_dusk.mp4</name>
+              <pathurl>file://localhost/media/drone/city_dusk.mp4</pathurl>
+              <rate>
+                <timebase>30</timebase>
+                <ntsc>FALSE</ntsc>
+              </rate>
+              <media>
+                <video/>
+              </media>
+            </file>
+          </clipitem>
+          <clipitem id="clipitem-5">
+            <name>mountain_ridge.mp4</name>
+            <duration>195</duration>
+            <rate>
+              <timebase>30</timebase>
+              <ntsc>FALSE</ntsc>
+            </rate>
+            <start>540</start>
+            <end>735</end>
+            <in>0</in>
+            <out>195</out>
+            <file id="file-5">
+              <name>mountain_ridge.mp4</name>
+              <pathurl>file://localhost/media/drone/mountain_ridge.mp4</pathurl>
+              <rate>
+                <timebase>30</timebase>
+                <ntsc>FALSE</ntsc>
+              </rate>
+              <media>
+                <video/>
+              </media>
+            </file>
+          </clipitem>
+          <clipitem id="clipitem-6">
+            <name>desert_dunes.mp4</name>
+            <duration>150</duration>
+            <rate>
+              <timebase>30</timebase>
+              <ntsc>FALSE</ntsc>
+            </rate>
+            <start>735</start>
+            <end>885</end>
+            <in>0</in>
+            <out>150</out>
+            <file id="file-6">
+              <name>desert_dunes.mp4</name>
+              <pathurl>file://localhost/media/drone/desert_dunes.mp4</pathurl>
+              <rate>
+                <timebase>30</timebase>
+                <ntsc>FALSE</ntsc>
+              </rate>
+              <media>
+                <video/>
+              </media>
+            </file>
+          </clipitem>
+        </track>
+      </video>
+      <audio>
+        <track>
+          <clipitem id="audioclip-0">
+            <name>track_A.wav</name>
+            <duration>360</duration>
+            <rate>
+              <timebase>30</timebase>
+              <ntsc>FALSE</ntsc>
+            </rate>
+            <start>0</start>
+            <end>360</end>
+            <in>0</in>
+            <out>360</out>
+            <file id="file-7">
+              <name>track_A.wav</name>
+              <pathurl>file://localhost/media/music/track_A.wav</pathurl>
+              <rate>
+                <timebase>30</timebase>
+                <ntsc>FALSE</ntsc>
+              </rate>
+              <media>
+                <audio/>
+              </media>
+            </file>
+          </clipitem>
+          <clipitem id="audioclip-1">
+            <name>track_B.wav</name>
+            <duration>300</duration>
+            <rate>
+              <timebase>30</timebase>
+              <ntsc>FALSE</ntsc>
+            </rate>
+            <start>450</start>
+            <end>750</end>
+            <in>0</in>
+            <out>300</out>
+            <file id="file-8">
+              <name>track_B.wav</name>
+              <pathurl>file://localhost/media/music/track_B.wav</pathurl>
+              <rate>
+                <timebase>30</timebase>
+                <ntsc>FALSE</ntsc>
+              </rate>
+              <media>
+                <audio/>
+              </media>
+            </file>
+          </clipitem>
+        </track>
+      </audio>
+    </media>
+  </sequence>
+</xmeml>

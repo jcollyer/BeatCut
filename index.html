@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>BeatCut</title>
+    <link rel="stylesheet" href="/src/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="wordmark">
+        <span class="pulse" aria-hidden="true"></span>
+        beatcut
+      </div>
+      <div class="topbar-meta" id="tempoReadout">no audio yet</div>
+    </header>
+
+    <main class="layout">
+      <aside class="bins">
+        <section class="bin">
+          <div class="bin-head">
+            <h2>Audio</h2>
+            <button class="ghost" id="addAudio">Add music</button>
+          </div>
+          <ul class="filelist" id="audioList">
+            <li class="empty">Add the song stems or full tracks. Beats are detected on drop.</li>
+          </ul>
+        </section>
+
+        <section class="bin">
+          <div class="bin-head">
+            <h2>Clips</h2>
+            <button class="ghost" id="addClips">Add clips</button>
+          </div>
+          <ul class="filelist" id="clipList">
+            <li class="empty">Add the video clips to draw from. Order doesn't matter.</li>
+          </ul>
+        </section>
+
+        <section class="controls">
+          <label class="field">
+            <span>Frame rate</span>
+            <select id="fps">
+              <option value="auto" selected>Auto (from first clip)</option>
+              <option value="24">24</option>
+              <option value="23.976">23.976</option>
+              <option value="25">25</option>
+              <option value="30">30</option>
+              <option value="29.97">29.97</option>
+              <option value="60">60</option>
+            </select>
+          </label>
+          <label class="checkbox">
+            <input type="checkbox" id="capOn" />
+            <span>Cap clip length</span>
+          </label>
+          <label class="field" id="capField" hidden>
+            <span>Max seconds per clip</span>
+            <input type="number" id="maxClip" min="1" step="0.5" value="12" />
+          </label>
+          <label class="field">
+            <span>Seed</span>
+            <span class="stepper">
+              <input type="number" id="seed" placeholder="random" />
+              <button class="ghost" id="reroll" type="button">Re-roll</button>
+            </span>
+          </label>
+        </section>
+      </aside>
+
+      <section class="stage">
+        <div class="stage-actions">
+          <button class="primary" id="generate">Generate cut</button>
+          <button class="secondary" id="export" disabled>Export for Premiere</button>
+          <span class="hint" id="status"></span>
+        </div>
+
+        <div class="timeline" id="timeline">
+          <div class="track" id="audioTrack">
+            <span class="track-label">A1</span>
+            <div class="lane" id="audioLane"></div>
+          </div>
+          <div class="track" id="videoTrack">
+            <span class="track-label">V1</span>
+            <div class="lane" id="videoLane">
+              <p class="lane-empty">Your beat-synced slots land here once you generate.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

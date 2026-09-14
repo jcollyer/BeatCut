@@ -1,0 +1,13 @@
+# Node / Vite
+node_modules/
+dist/
+
+# Rust / Tauri
+src-tauri/target/
+src-tauri/gen/schemas/
+
+# Python venv for the madmom sidecar
+.venv/
+
+# OS noise
+.DS_Store
