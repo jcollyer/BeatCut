@@ -117,6 +117,12 @@ html, body {
   font-size: 12px;
   line-height: 1.4;
 }
+/* A clip the current cut doesn't use: a ghost row, dashed like the empty state. */
+.filelist li.unused {
+  background: transparent;
+  border-style: dashed;
+}
+.filelist li.unused .name { color: var(--muted); }
 .filelist .tc {
   font-family: var(--mono);
   font-size: 11px;

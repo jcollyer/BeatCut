@@ -114,7 +114,8 @@ In Premiere, use File ▸ Import on the exported `.xml`.
   that opens a 4-bar loop, looking back up to two bars — or **Last beat** (least
   trim). Scoring the hits makes song analysis slower: about 15 s for a 2-minute
   song on an Apple Silicon Mac
-- Timeline preview (audio blocks + beat ticks, video slots)
+- Timeline preview (audio blocks + beat ticks, video slots); clips the cut
+  doesn't use are marked unused in the Clips list
 - Export valid xmeml with per-file dedup; imports into Premiere Pro
 
 **Not done yet** (phases from [SPEC.md](SPEC.md) §9)

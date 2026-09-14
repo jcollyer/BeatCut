@@ -137,6 +137,7 @@ function renderClipList() {
     ul.innerHTML = `<li class="empty">Add the video clips to draw from. Order doesn't matter.</li>`;
     return;
   }
+  const unused = unusedClips();
   ul.innerHTML = state.clips
     .map((c, i) => {
       const right = c.probing
@@ -145,13 +146,34 @@ function renderClipList() {
         ? `<span class="tc" style="color:var(--danger)">error</span>`
         : !c.width
         ? `<span class="tc" style="color:var(--danger)">no video</span>`
-        : `<span class="tc">${c.duration ? fmtTime(c.duration) : "—"}</span>`;
+        : `<span class="tc">${unused.has(c) ? "unused · " : ""}${c.duration ? fmtTime(c.duration) : "—"}</span>`;
       const tip = c.probing
         ? ""
-        : c.error || (c.width ? `${c.width}×${c.height} · ${c.fps ? +c.fps.toFixed(3) : "?"} fps` : "No video stream. Songs go in Add music.");
-      return `<li title="${esc(tip)}"><span class="name">${esc(c.name)}</span>${right}${removeButton("clips", i, c.name)}</li>`;
+        : c.error ||
+          (c.width
+            ? `${unused.has(c) ? "Not in the current cut · " : ""}${c.width}×${c.height} · ${c.fps ? +c.fps.toFixed(3) : "?"} fps`
+            : "No video stream. Songs go in Add music.");
+      return `<li${unused.has(c) ? ' class="unused"' : ""} title="${esc(tip)}"><span class="name">${esc(c.name)}</span>${right}${removeButton("clips", i, c.name)}</li>`;
     })
     .join("");
+}
+
+// Clips the current cut leaves out. Matched on full path, since cameras reuse
+// names like DJI_0001.MP4 across cards, and counted, since a file added twice
+// is two clips. Only clips Generate could place are considered; the rest keep
+// their own tag (error, no video).
+function unusedClips() {
+  const unused = new Set();
+  if (!state.timeline) return unused;
+  const slots = new Map();
+  for (const { path } of state.timeline.video) slots.set(path, (slots.get(path) || 0) + 1);
+  for (const c of state.clips) {
+    if (!(c.duration > 0 && c.width)) continue;
+    const left = slots.get(c.path) || 0;
+    if (left) slots.set(c.path, left - 1);
+    else unused.add(c);
+  }
+  return unused;
 }
 
 // Remove buttons in either bin.
@@ -346,6 +368,7 @@ $("generate").addEventListener("click", async () => {
     const timeline = await invoke("generate_timeline", { songs, clips, settings });
     state.timeline = timeline;
     renderTimeline();
+    renderClipList(); // mark the clips this cut leaves out
     $("export").disabled = false;
     const unused = timeline.unused_clips || [];
     let msg = `${timeline.video.length} clips placed.`;
