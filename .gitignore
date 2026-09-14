@@ -6,8 +6,9 @@ dist/
 src-tauri/target/
 src-tauri/gen/schemas/
 
-# Python venv for the madmom sidecar
+# Python venv for the madmom sidecar, and bytecode caches
 .venv/
+__pycache__/
 
 # OS noise
 .DS_Store

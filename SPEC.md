@@ -219,10 +219,16 @@ install it. The frontend snaps `fps` to a standard sequence rate for "Auto".
 
 `BeatResult.strength` holds one score per beat (empty if that analysis failed),
 computed in `detect_beats.py` as `max(kick, 0.6 × snare)`, plus `0.25 × kick` on
-the 1 of a bar and `0.5 × kick` on the 1 that opens a 4-bar loop, so scores run
-from 0 to 1.75. Kick and snare are percussive onset strength at the beat,
-normalized per song to 0–1. Bars come from madmom's bar tracker run on the
-detected beats; loop starts are the downbeats that follow the song's fills.
+the 1 of a bar and `0.5 × min(1, kick / 0.6)` on the 1 that opens a 4-bar loop,
+so scores run from 0 to 1.75. Kick and snare are percussive onset strength at the
+beat, normalized per song to 0–1. Any clear kick earns the whole loop bonus,
+because the fill just before a loop start makes that kick measure weaker than it
+sounds. Bars come from madmom's bar tracker run on the detected beats. Loop
+starts: each downbeat gets a fill score (full-mix onset strength over the half
+bar before it); when at least 70% of the song's biggest fills (its top 15% of
+downbeats) sit at one place in the 4-bar cycle, and the song's first and second
+half agree on that place, every downbeat there opens a loop — as does any
+downbeat after a fill 1.8× the song's median.
 
 ### Inputs
 
@@ -354,9 +360,14 @@ Icons, app metadata, signed builds for the target OS(es).
   a 2-minute song on Apple Silicon. Detect once per song and cache. For bars, use
   madmom's bar tracker on the detected beats, not `DBNDownBeatTrackingProcessor`:
   on hi-hat-heavy material that one tracked double tempo and split bars in half.
-- **Loop starts in loop-based music can be subtle.** Fills before the 4-bar
-  boundary were clear enough in only 2 of 7 lo-fi test songs, so most songs get
-  no loop-start bonus; kicks and downbeats still carry strong-hits mode.
+- **Loop starts in loop-based music can be subtle.** Lo-fi fills are small and
+  often come only every 8 bars, so averaging fill strength per 4-bar position
+  found loops in just 2 of 7 test songs. Looking at where the song's biggest
+  fills cluster, and requiring both halves of the song to agree, finds them in 5
+  of 7; on shuffled data a 60% bar still reported loops up to 5% of the time,
+  while 70% keeps that near 1%. Songs with no consistent loop get no loop bonus
+  (kicks and downbeats still carry strong hits). If every detected downbeat in a
+  song has a weak kick, its bars may be a beat off; loop logic can't fix that.
 - **Tauri 2 API churn** — verify plugin/permission specifics against live docs.
 
 ---
