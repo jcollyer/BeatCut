@@ -3,7 +3,7 @@ import { open, save } from "@tauri-apps/plugin-dialog";
 
 // ------------------------------------------------------------------ state
 const state = {
-  audio: [], // { path, name, beats:[], duration, tempo }
+  audio: [], // { path, name, beats:[], strength:[], duration, tempo }
   clips: [], // { path, name, duration|null, fps, width, height, probing, error }
   timeline: null, // last generated Timeline from the backend
 };
@@ -43,12 +43,13 @@ $("addAudio").addEventListener("click", async () => {
   const paths = Array.isArray(picked) ? picked : [picked];
 
   for (const path of paths) {
-    const entry = { path, name: baseName(path), beats: [], duration: null, tempo: null, working: true };
+    const entry = { path, name: baseName(path), beats: [], strength: [], duration: null, tempo: null, working: true };
     state.audio.push(entry);
     renderAudioList();
     try {
       const res = await invoke("detect_beats_cmd", { audioPath: path });
       entry.beats = res.beats || [];
+      entry.strength = res.strength || [];
       entry.tempo = res.tempo;
       entry.duration = res.duration;
     } catch (e) {
@@ -213,6 +214,7 @@ function readSettings(media) {
     height,
     seed: seedVal ? Number(seedVal) : null,
     maxClipSecs: capOn ? Math.max(1, parseFloat($("maxClip").value) || 12) : null,
+    cutMode: $("cutMode").value, // "strongHits" | "lastBeat"
   };
 }
 
@@ -272,11 +274,15 @@ $("generate").addEventListener("click", async () => {
   const songs = state.audio.map((a) => ({
     path: a.path,
     beats: a.beats,
+    strength: a.strength || [],
     duration: a.duration || (a.beats.length ? a.beats[a.beats.length - 1] : 0),
   }));
   const clips = usable.map((c) => ({ path: c.path, duration: c.duration }));
   const media = firstClipMedia(usable);
   const settings = readSettings(media);
+  // Songs without strength scores fall back to the last beat in "strong hits" mode.
+  const noStrength =
+    settings.cutMode === "strongHits" ? state.audio.filter((a) => a.beats.length && !(a.strength || []).length).length : 0;
 
   try {
     const timeline = await invoke("generate_timeline", { songs, clips, settings });
@@ -288,6 +294,7 @@ $("generate").addEventListener("click", async () => {
     if (unused.length) msg += ` ${unused.length} didn't fit: ${unused.join(", ")}.`;
     if (unmeasured) msg += ` (${unmeasured} clip(s) skipped — no duration.)`;
     if (noVideo) msg += ` (${noVideo} file(s) skipped — no video.)`;
+    if (noStrength) msg += ` (${noStrength} song(s) had no hit analysis, so they cut on the last beat.)`;
     msg += ` Sequence: ${rateLabel(settings)} fps, ${settings.width}×${settings.height}.`;
     setStatus(msg);
     firePulse();

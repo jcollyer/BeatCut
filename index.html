@@ -71,6 +71,13 @@
               <input type="number" id="resH" min="16" step="1" value="1080" aria-label="Height" />
             </span>
           </div>
+          <label class="field">
+            <span>Cut on</span>
+            <select id="cutMode">
+              <option value="strongHits" selected>Strong hits (kicks, the 1, loop starts)</option>
+              <option value="lastBeat">Last beat (least trim)</option>
+            </select>
+          </label>
           <label class="checkbox">
             <input type="checkbox" id="capOn" />
             <span>Cap clip length</span>

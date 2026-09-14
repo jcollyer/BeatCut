@@ -108,6 +108,10 @@ In Premiere, use File ▸ Import on the exported `.xml`.
   (presets or a custom size)
 - Generate: seeded shuffle, clip ends trimmed back to a beat, contiguous video,
   overruns push the next song, optional max clip length; re-roll = new seed
+- Cut on **Strong hits** (default) — favours kicks, the 1 of a bar and the kick
+  that opens a 4-bar loop, looking back up to two bars — or **Last beat** (least
+  trim). Scoring the hits makes song analysis slower: about 15 s for a 2-minute
+  song on an Apple Silicon Mac
 - Timeline preview (audio blocks + beat ticks, video slots)
 - Export valid xmeml with per-file dedup; imports into Premiere Pro
 

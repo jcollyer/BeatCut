@@ -4,9 +4,14 @@
 //! * Video track is the master and is ALWAYS contiguous — never a gap.
 //! * Songs play in order; song 0 starts at t=0.
 //! * Clips are shuffled (seeded) and used ONCE, laid left-to-right from t=0.
-//! * A clip keeps its full length but its END is trimmed back to the nearest
-//!   beat AT OR BEFORE its natural end (trims the least; the next clip then
-//!   starts on that beat).
+//! * A clip keeps its full length but its END is trimmed back to a beat AT OR
+//!   BEFORE its natural end, picked by the cut mode:
+//!   - LastBeat: the nearest such beat (trims the least; the next clip then
+//!     starts on that beat).
+//!   - StrongHits: among the last HIT_WINDOW_BEATS such beats, the one with the
+//!     best per-beat strength from the song analysis (kicks, the 1 of a bar,
+//!     phrase starts — see detect_beats.py), minus HIT_TRIM_PENALTY for each
+//!     beat of extra trim. Songs without strength fall back to LastBeat.
 //! * If a clip's natural end runs past the current song's end, it OVERRUNS:
 //!   it plays full length (unsnapped — there are no beats in the silence), and
 //!   the next song's start is PUSHED to line up with the clip's end. This opens
@@ -15,6 +20,7 @@
 //!   we stop.
 //! * Stop when clips run out or audio (songs) run out. Leftover clips are
 //!   reported as unused.
+//! * Frames are counted at the real rate: an NTSC timebase runs 1000/1001 slow.
 
 use rand::rngs::StdRng;
 use rand::seq::SliceRandom;
@@ -23,6 +29,10 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 
 const EPS: f64 = 1e-9;
+/// StrongHits looks back at most this many beats (two bars of 4/4)...
+const HIT_WINDOW_BEATS: usize = 8;
+/// ...and a beat further back must beat a later one by this much strength per beat.
+const HIT_TRIM_PENALTY: f64 = 0.1;
 
 /// One song. `beats` are in seconds relative to the song's own start.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -30,6 +40,10 @@ pub struct SongInput {
     pub path: String,
     pub beats: Vec<f64>,
     pub duration: f64,
+    /// Cut strength per beat, same order as `beats`, for CutMode::StrongHits.
+    /// Empty (or not one value per beat) means this song cuts on the last beat.
+    #[serde(default)]
+    pub strength: Vec<f64>,
 }
 
 /// One source clip. Duration is REQUIRED in this model — we can't place a clip
@@ -39,6 +53,17 @@ pub struct SongInput {
 pub struct ClipInput {
     pub path: String,
     pub duration: f64,
+}
+
+/// Where a clip that ends inside a song gets its cut.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum CutMode {
+    /// The last beat at or before the natural end.
+    #[default]
+    LastBeat,
+    /// The strongest recent beat, weighed against the extra trim.
+    StrongHits,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -55,6 +80,9 @@ pub struct GenerateSettings {
     /// Optional cap so a long clip can't drag. None = keep full length.
     #[serde(default)]
     pub max_clip_secs: Option<f64>,
+    /// Where cuts inside a song land. Defaults to the last beat.
+    #[serde(default)]
+    pub cut_mode: CutMode,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -88,8 +116,11 @@ pub struct Timeline {
     pub unused_clips: Vec<String>,
 }
 
-fn to_frame(seconds: f64, fps: u32) -> i64 {
-    (seconds * fps as f64).round() as i64
+/// Seconds to frames at the real rate. An NTSC "30" timebase is 30000/1001 fps;
+/// counting it at 30 would put cuts about a frame late every 33 seconds.
+fn to_frame(seconds: f64, fps: u32, ntsc: bool) -> i64 {
+    let rate = if ntsc { fps as f64 * 1000.0 / 1001.0 } else { fps as f64 };
+    (seconds * rate).round() as i64
 }
 
 fn file_name(path: &str) -> String {
@@ -117,6 +148,35 @@ fn snap_end(song_start: f64, beats: &[f64], lower: f64, upper: f64) -> Option<f6
     best
 }
 
+/// StrongHits: of the last HIT_WINDOW_BEATS beats strictly after `lower` and
+/// <= `upper`, the one with the best `strength` minus HIT_TRIM_PENALTY per beat
+/// back from the latest. Scores within EPS tie, and ties go to the later beat.
+/// `beats` must be ascending and relative to `song_start`, `strength` aligned.
+fn snap_strong(
+    song_start: f64,
+    beats: &[f64],
+    strength: &[f64],
+    lower: f64,
+    upper: f64,
+) -> Option<f64> {
+    let candidates: Vec<usize> = (0..beats.len())
+        .filter(|&i| {
+            let abs = song_start + beats[i];
+            abs > lower + EPS && abs <= upper + EPS
+        })
+        .collect();
+    let window = &candidates[candidates.len().saturating_sub(HIT_WINDOW_BEATS)..];
+    let mut best: Option<(usize, f64)> = None;
+    for (k, &i) in window.iter().enumerate() {
+        let beats_back = (window.len() - 1 - k) as f64;
+        let score = strength[i] - HIT_TRIM_PENALTY * beats_back;
+        if best.map_or(true, |(_, top)| score >= top - EPS) {
+            best = Some((i, score));
+        }
+    }
+    best.map(|(i, _)| song_start + beats[i])
+}
+
 pub fn build_timeline(
     songs: &[SongInput],
     clips: &[ClipInput],
@@ -130,6 +190,7 @@ pub fn build_timeline(
     }
 
     let fps = settings.fps;
+    let ntsc = settings.ntsc;
 
     // Seeded shuffle so a re-roll is just a new seed.
     let mut rng: StdRng = match settings.seed {
@@ -139,13 +200,22 @@ pub fn build_timeline(
     let mut order: Vec<usize> = (0..clips.len()).collect();
     order.shuffle(&mut rng);
 
-    // Defensive: sort each song's beats once.
-    let sorted_beats: Vec<Vec<f64>> = songs
+    // Defensive: sort each song's beats once, carrying strength along. Strength
+    // that isn't one value per beat is dropped (that song cuts on the last beat).
+    let sorted: Vec<(Vec<f64>, Option<Vec<f64>>)> = songs
         .iter()
         .map(|s| {
-            let mut b = s.beats.clone();
-            b.sort_by(|x, y| x.partial_cmp(y).unwrap());
-            b
+            let aligned = s.strength.len() == s.beats.len();
+            let mut pairs: Vec<(f64, f64)> = s
+                .beats
+                .iter()
+                .enumerate()
+                .map(|(i, &b)| (b, if aligned { s.strength[i] } else { 0.0 }))
+                .collect();
+            pairs.sort_by(|x, y| x.0.partial_cmp(&y.0).unwrap());
+            let beats = pairs.iter().map(|p| p.0).collect();
+            let strength = aligned.then(|| pairs.iter().map(|p| p.1).collect());
+            (beats, strength)
         })
         .collect();
 
@@ -159,10 +229,10 @@ pub fn build_timeline(
     let push_audio = |items: &mut Vec<AudioItem>, s: &SongInput, start: f64| {
         items.push(AudioItem {
             path: s.path.clone(),
-            start: to_frame(start, fps),
-            end: to_frame(start + s.duration, fps),
+            start: to_frame(start, fps, ntsc),
+            end: to_frame(start + s.duration, fps, ntsc),
             in_frame: 0,
-            out_frame: to_frame(s.duration, fps),
+            out_frame: to_frame(s.duration, fps, ntsc),
         });
     };
     push_audio(&mut audio_items, &songs[0], song_start);
@@ -190,14 +260,21 @@ pub fn build_timeline(
         let natural_end = t + eff_len;
 
         let overruns = natural_end > song_end + EPS;
+        let (beats, strength) = &sorted[song_idx];
         let clip_end = if overruns {
             natural_end // play full over the coming silence
         } else {
-            snap_end(song_start, &sorted_beats[song_idx], t, natural_end).unwrap_or(natural_end)
+            let snapped = match (settings.cut_mode, strength) {
+                (CutMode::StrongHits, Some(strength)) => {
+                    snap_strong(song_start, beats, strength, t, natural_end)
+                }
+                _ => snap_end(song_start, beats, t, natural_end),
+            };
+            snapped.unwrap_or(natural_end)
         };
 
-        let sf = to_frame(t, fps);
-        let ef = to_frame(clip_end, fps);
+        let sf = to_frame(t, fps, ntsc);
+        let ef = to_frame(clip_end, fps, ntsc);
         if ef <= sf {
             // sub-frame clip — can't render; treat as unused and move on.
             clip_pos += 1;
@@ -236,7 +313,7 @@ pub fn build_timeline(
 
     Ok(Timeline {
         fps,
-        ntsc: settings.ntsc,
+        ntsc,
         width: settings.width,
         height: settings.height,
         total_frames,

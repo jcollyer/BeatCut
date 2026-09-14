@@ -1,11 +1,14 @@
 # Faithful mirror of timeline.rs + fcp7xml.rs, on fixed sample data,
 # to preview the exact XML structure. Clip order is a fixed "already shuffled"
 # example so output is deterministic and matches the hand-walked case.
+# build() takes ntsc and cut_mode like GenerateSettings; the fixture uses the defaults.
 import os, xml.dom.minidom as minidom
 
 EPS = 1e-9
+HIT_WINDOW_BEATS = 8    # StrongHits look-back, in beats
+HIT_TRIM_PENALTY = 0.1  # strength each extra beat of trim has to buy
 
-def to_frame(sec, fps): return round(sec * fps)
+def to_frame(sec, fps, ntsc=False): return round(sec * (fps * 1000 / 1001 if ntsc else fps))
 def file_name(p): return p.replace("\\", "/").split("/")[-1]
 
 def xml_escape(s):
@@ -25,12 +28,20 @@ def snap_end(song_start, beats, lower, upper):
         else: break
     return best
 
-def build(songs, clips, fps, max_clip=None):
+def snap_strong(song_start, beats, strength, lower, upper):
+    cands = [i for i, b in enumerate(beats) if lower + EPS < song_start + b <= upper + EPS][-HIT_WINDOW_BEATS:]
+    best = None
+    for k, i in enumerate(cands):
+        score = strength[i] - HIT_TRIM_PENALTY * (len(cands) - 1 - k)
+        if best is None or score >= best[1] - EPS: best = (i, score)
+    return song_start + beats[best[0]] if best else None
+
+def build(songs, clips, fps, max_clip=None, ntsc=False, cut_mode="lastBeat"):
     audio, video = [], []
     def push_audio(s, start):
-        audio.append(dict(path=s["path"], start=to_frame(start,fps),
-                          end=to_frame(start+s["duration"],fps),
-                          in_f=0, out_f=to_frame(s["duration"],fps)))
+        audio.append(dict(path=s["path"], start=to_frame(start,fps,ntsc),
+                          end=to_frame(start+s["duration"],fps,ntsc),
+                          in_f=0, out_f=to_frame(s["duration"],fps,ntsc)))
     si = 0
     song_start = 0.0
     song_end = songs[0]["duration"]
@@ -46,8 +57,16 @@ def build(songs, clips, fps, max_clip=None):
         eff = min(clip["duration"], max_clip) if (max_clip and max_clip>0) else clip["duration"]
         natural_end = t + eff
         overruns = natural_end > song_end + EPS
-        clip_end = natural_end if overruns else (snap_end(song_start, songs[si]["beats"], t, natural_end) or natural_end)
-        sf, ef = to_frame(t,fps), to_frame(clip_end,fps)
+        if overruns:
+            clip_end = natural_end
+        else:
+            strength = songs[si].get("strength") or []
+            if cut_mode == "strongHits" and len(strength) == len(songs[si]["beats"]):
+                snapped = snap_strong(song_start, songs[si]["beats"], strength, t, natural_end)
+            else:
+                snapped = snap_end(song_start, songs[si]["beats"], t, natural_end)
+            clip_end = snapped or natural_end
+        sf, ef = to_frame(t,fps,ntsc), to_frame(clip_end,fps,ntsc)
         if ef <= sf: pos += 1; continue
         video.append(dict(path=clip["path"], start=sf, end=ef, in_f=0, out_f=ef-sf))
         pos += 1; t = clip_end
@@ -57,7 +76,7 @@ def build(songs, clips, fps, max_clip=None):
             push_audio(songs[si], song_start)
     unused = [file_name(c["path"]) for c in clips[pos:]]
     total = max((video[-1]["end"] if video else 0), (audio[-1]["end"] if audio else 0))
-    return dict(fps=fps, ntsc=False, width=1920, height=1080,
+    return dict(fps=fps, ntsc=ntsc, width=1920, height=1080,
                 total_frames=total, audio=audio, video=video, unused=unused)
 
 def rate(fps, ntsc, ind):

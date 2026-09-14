@@ -8,6 +8,10 @@ pub struct BeatResult {
     pub beats: Vec<f64>,
     pub tempo: Option<f64>,
     pub duration: Option<f64>,
+    /// Cut strength per beat for the "strong hits" cut mode (see
+    /// detect_beats.py); empty when that analysis failed.
+    #[serde(default)]
+    pub strength: Vec<f64>,
 }
 
 /// Run `python detect_beats.py <audio_path>` and parse the JSON it prints.
@@ -91,7 +95,9 @@ pub fn probe_media(path: &str) -> Result<MediaInfo, String> {
     let no_stream = serde_json::Value::Null;
     let stream = value["streams"]
         .as_array()
-        .and_then(|streams| streams.iter().find(|s| s["disposition"]["attached_pic"].as_i64() != Some(1)))
+        .and_then(|streams| {
+            streams.iter().find(|s| s["disposition"]["attached_pic"].as_i64() != Some(1))
+        })
         .unwrap_or(&no_stream);
     let fps = parse_rate(&stream["avg_frame_rate"]).or_else(|| parse_rate(&stream["r_frame_rate"]));
     let mut width = stream["width"].as_u64().and_then(|w| u32::try_from(w).ok());

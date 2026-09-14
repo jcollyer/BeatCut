@@ -119,10 +119,19 @@ The two files to protect the behaviour of: **`timeline.rs`** (placement) and
       no next song, **stop**.
    b. `effective_length = min(duration, maxClipSecs)` if a cap is set, else
       `duration`. `natural_end = t + effective_length`.
-   c. **If `natural_end <= current_song_end`** (ends inside the song):
-      trim the end to the **largest beat that is `> t` and `<= natural_end`**
-      (least possible trim, lands on a beat). If no such beat exists (clip
-      shorter than the gap to the next beat), use `natural_end` unsnapped.
+   c. **If `natural_end <= current_song_end`** (ends inside the song): the
+      candidates are the beats `> t` and `<= natural_end`, and the cut mode
+      picks one:
+      - **Last beat** (`lastBeat`, the backend default): the **largest**
+        candidate (least possible trim, lands on a beat).
+      - **Strong hits** (`strongHits`, the UI default): among the last **8**
+        candidates (two bars of 4/4), the highest `strength − 0.1 × beats_back`,
+        with `beats_back` counted from the latest candidate. Scores within 1e-9
+        tie, and ties go to the later beat. `strength` is the song analysis's
+        per-beat score (§6); a song without one value per beat uses last beat.
+
+      If there are no candidates (clip shorter than the gap to the next beat),
+      use `natural_end` unsnapped.
    d. **Else (overrun):** the clip plays its **full** length (unsnapped — there
       are no beats in the silence it runs into). `clip_end = natural_end`.
    e. Emit a video slot `[frame(t), frame(clip_end)]`, `in = 0`,
@@ -133,9 +142,11 @@ The two files to protect the behaviour of: **`timeline.rs`** (placement) and
 4. **Stop** when clips run out or songs run out. Any clips not placed are
    reported as **unused** (by filename).
 
-**Frame snapping:** `frame(sec) = round(sec * fps)`. Video stays contiguous
-because each clip's end time is literally the next clip's start time — the same
-float rounds identically, so `frame(end_i) == frame(start_{i+1})`.
+**Frame snapping:** `frame(sec) = round(sec * rate)`, with `rate = fps` for an
+integer timebase and `fps × 1000/1001` when `ntsc` is set (an NTSC "30" is
+29.97 fps; counting it at 30 would put cuts a frame late every ~33 s). Video
+stays contiguous because each clip's end time is literally the next clip's start
+time — the same float rounds identically, so `frame(end_i) == frame(start_{i+1})`.
 
 ### 5.3 Edge cases (all confirmed with the user)
 
@@ -143,8 +154,8 @@ float rounds identically, so `frame(end_i) == frame(start_{i+1})`.
 |---|---|
 | Video track | **Always contiguous — never a gap between clips.** |
 | Audio track | Gaps (silence) between songs are **allowed**. |
-| Clip ends inside a song | End trims to nearest beat **at or before** natural end. |
-| Snap granularity | **Beats only**, not bars (bar-snapping would trim more, fighting "max use"). |
+| Clip ends inside a song | End trims to a beat **at or before** natural end: the nearest one (last beat) or the best-scoring of the last 8 (strong hits). |
+| Snap granularity | **Beats only.** Strong hits favours kicks, the 1 of a bar and the kick that opens a 4-bar loop, but never looks back more than 8 beats. |
 | Clip overruns a song | Plays **full length, unsnapped**; next song pushed to clip end. |
 | Overrun on the **last** song | Plays out over silence, then stop. |
 | Clip shorter than one beat gap | Use natural end unsnapped (rare for 7–60 s clips). |
@@ -195,7 +206,7 @@ output are **integer frames**; all inputs are **seconds (f64)**.
 
 | Command | JS args | Returns |
 |---|---|---|
-| `detect_beats_cmd` | `{ audioPath }` | `BeatResult { beats:[f64], tempo:f64?, duration:f64? }` |
+| `detect_beats_cmd` | `{ audioPath }` | `BeatResult { beats:[f64], tempo:f64?, duration:f64?, strength:[f64] }` |
 | `probe_media` | `{ path }` | `MediaInfo { duration:f64?, fps:f64?, width:u32?, height:u32? }` / error string |
 | `generate_timeline` | `{ songs, clips, settings }` | `Timeline` |
 | `export_xml` | `{ timeline, outPath, sequenceName }` | `()` / error string |
@@ -206,10 +217,18 @@ with rotation metadata applied; the video fields are null for files without a
 video stream. Errors are user-facing text — a missing ffprobe says how to
 install it. The frontend snaps `fps` to a standard sequence rate for "Auto".
 
+`BeatResult.strength` holds one score per beat (empty if that analysis failed),
+computed in `detect_beats.py` as `max(kick, 0.6 × snare)`, plus `0.25 × kick` on
+the 1 of a bar and `0.5 × kick` on the 1 that opens a 4-bar loop, so scores run
+from 0 to 1.75. Kick and snare are percussive onset strength at the beat,
+normalized per song to 0–1. Bars come from madmom's bar tracker run on the
+detected beats; loop starts are the downbeats that follow the song's fills.
+
 ### Inputs
 
 ```
-SongInput   { path: string, beats: f64[] (sec, rel. to song start), duration: f64 (sec) }
+SongInput   { path: string, beats: f64[] (sec, rel. to song start), duration: f64 (sec),
+              strength: f64[] }   // #[serde(default)]; one per beat, used by strongHits
 ClipInput   { path: string, duration: f64 (sec, REQUIRED) }
 GenerateSettings {   // camelCase over IPC
   fps: u32,
@@ -218,6 +237,7 @@ GenerateSettings {   // camelCase over IPC
   height: u32,
   seed: u64 | null,           // #[serde(default)]
   maxClipSecs: f64 | null,    // #[serde(default)]; null = no cap
+  cutMode: "lastBeat" | "strongHits",   // #[serde(default)] = lastBeat (§5.2 step 3c)
 }
 ```
 
@@ -264,10 +284,12 @@ Rules the renderer already follows and must keep:
 ## 8. Settled decisions
 
 Clip-driven placement · contiguous video · seeded re-roll · each clip once ·
-trim end to nearest beat at/before natural end · beats not bars · overrun pushes
-next song, silent audio gaps allowed, last clip plays out · in-point always 0 ·
-hard cuts · optional max-clip cap (off by default) · auto fps/res from first clip
-with manual override · unused clips reported by count + name.
+trim end to a beat at/before natural end — strong hits by default (kicks, the 1,
+4-bar loop starts; 8-beat look-back), last beat as the least-trim option ·
+overrun pushes next song, silent audio gaps allowed, last clip plays out ·
+in-point always 0 · hard cuts · optional max-clip cap (off by default) · auto
+fps/res from first clip with manual override · NTSC frames counted at the true
+1000/1001 rate · unused clips reported by count + name.
 
 ---
 
@@ -321,14 +343,20 @@ Icons, app metadata, signed builds for the target OS(es).
 
 - **madmom install is fussy** about numpy/scipy. Pin `numpy<2` in the venv. Point
   the app at the interpreter with `BEATCUT_PYTHON`. Long-term: bundle it (Phase 4).
-- **NTSC / rational time.** xmeml stores integer frames + timebase + ntsc flag,
-  so the integer path is clean, but 23.976/29.97 need a real import test. If
-  drift appears, consider modelling time as exact fractions like the
+- **NTSC / rational time.** xmeml stores integer frames + timebase + ntsc flag.
+  Frames are counted at the true 1000/1001 rate (§5.2), so cuts don't drift
+  against the audio, but 23.976/29.97 still need a real Premiere import test. If
+  rounding error shows up, consider modelling time as exact fractions like the
   `@chatoctopus/timeline` library does.
 - **file:// paths across OSes** — the current encoder is minimal (Phase 4).
-- **Beat detection latency** — madmom is not instant on long tracks; detect once
-  per song and cache. Consider `DBNDownBeatTrackingProcessor` later if the user
-  ever wants a bar-feel option (not in scope now).
+- **Beat detection latency** — madmom is not instant on long tracks, and the
+  strength analysis (bar tracking + percussive onsets) adds to it: about 15 s for
+  a 2-minute song on Apple Silicon. Detect once per song and cache. For bars, use
+  madmom's bar tracker on the detected beats, not `DBNDownBeatTrackingProcessor`:
+  on hi-hat-heavy material that one tracked double tempo and split bars in half.
+- **Loop starts in loop-based music can be subtle.** Fills before the 4-bar
+  boundary were clear enough in only 2 of 7 lo-fi test songs, so most songs get
+  no loop-start bonus; kicks and downbeats still carry strong-hits mode.
 - **Tauri 2 API churn** — verify plugin/permission specifics against live docs.
 
 ---
