@@ -1,6 +1,8 @@
 # Node / Vite
 node_modules/
 dist/
+*.log
+npm-debug.log*
 
 # Rust / Tauri
 src-tauri/target/
@@ -8,7 +10,38 @@ src-tauri/gen/schemas/
 
 # Python venv for the madmom sidecar, and bytecode caches
 .venv/
+venv/
 __pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Test media and exports: songs and clips stay out of the repo
+*.mp4
+*.mov
+*.m4v
+*.mkv
+*.avi
+*.mxf
+*.wav
+*.mp3
+*.aif
+*.aiff
+*.flac
+*.m4a
+
+# Local env and secrets
+.env
+.env.*
+
+# Editors
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.swp
+
+# Local Claude Code settings
+.claude/settings.local.json
 
 # OS noise
 .DS_Store
+Thumbs.db
