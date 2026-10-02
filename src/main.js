@@ -45,14 +45,22 @@ $("addAudio").addEventListener("click", async () => {
   if (!picked) return;
   const paths = Array.isArray(picked) ? picked : [picked];
 
+  // List the whole batch up front, grayed out, then detect one song at a time.
+  const entries = paths.map((path) => ({
+    path, name: baseName(path), beats: [], strength: [], duration: null, tempo: null, working: true, started: false,
+  }));
+  state.audio.push(...entries);
+  renderAudioList();
+  updateTempoReadout();
+
   const epoch = audioEpoch;
-  for (const path of paths) {
+  for (const entry of entries) {
     if (epoch !== audioEpoch) break; // the bin was cleared mid-batch
-    const entry = { path, name: baseName(path), beats: [], strength: [], duration: null, tempo: null, working: true };
-    state.audio.push(entry);
+    if (!state.audio.includes(entry)) continue; // removed while it waited
+    entry.started = true;
     renderAudioList();
     try {
-      const res = await invoke("detect_beats_cmd", { audioPath: path });
+      const res = await invoke("detect_beats_cmd", { audioPath: entry.path });
       entry.beats = res.beats || [];
       entry.strength = res.strength || [];
       entry.tempo = res.tempo;
@@ -88,11 +96,13 @@ function renderAudioList() {
   ul.innerHTML = state.audio
     .map((a, i) => {
       const right = a.working
-        ? `<span class="tc working">detecting…</span>`
+        ? a.started
+          ? `<span class="tc working">detecting…</span>`
+          : `<span class="tc">queued</span>`
         : a.error
         ? `<span class="tc" style="color:var(--danger)">error</span>`
         : `<span class="tc">${a.beats.length} beats · ${fmtTime(a.duration)}</span>`;
-      return `<li><span class="name">${esc(a.name)}</span>${right}${removeButton("audio", i, a.name)}</li>`;
+      return `<li${a.working ? ` class="pending"` : ""}><span class="name">${esc(a.name)}</span>${right}${removeButton("audio", i, a.name)}</li>`;
     })
     .join("");
 }

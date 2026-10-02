@@ -123,6 +123,9 @@ html, body {
   border-style: dashed;
 }
 .filelist li.unused .name { color: var(--muted); }
+/* A song still waiting on beat detection: grayed out until its beats are in. */
+.filelist li.pending { background: transparent; }
+.filelist li.pending .name { color: var(--muted); }
 .filelist .tc {
   font-family: var(--mono);
   font-size: 11px;
