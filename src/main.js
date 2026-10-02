@@ -40,7 +40,7 @@ function setStatus(msg, isError = false) {
 $("addAudio").addEventListener("click", async () => {
   const picked = await open({
     multiple: true,
-    filters: [{ name: "Audio", extensions: ["wav", "mp3", "aiff", "aif", "flac", "m4a", "mp4"] }],
+    filters: [{ name: "Audio", extensions: ["wav", "mp3", "aiff", "aif", "flac", "m4a", "mp4", "mov"] }],
   });
   if (!picked) return;
   const paths = Array.isArray(picked) ? picked : [picked];

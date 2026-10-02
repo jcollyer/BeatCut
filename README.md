@@ -85,7 +85,7 @@ The first run compiles the Rust side, which takes a few minutes.
 unset the app falls back to `python3`, which usually has no madmom, so every
 song shows "error".
 
-In the app: **Add music** (wav, mp3, aif/aiff, flac, m4a, mp4) → **Add clips**
+In the app: **Add music** (wav, mp3, aif/aiff, flac, m4a, mp4, mov) → **Add clips**
 (mp4, mov, mkv, m4v, avi, mxf) → **Generate cut** → **Export for Premiere**.
 In Premiere, use File ▸ Import on the exported `.xml`.
 
