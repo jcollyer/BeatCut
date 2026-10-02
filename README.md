@@ -1,3 +1,5 @@
+<p align="center"><img src="app-icon.png" alt="BeatCut icon" width="128"></p>
+
 # BeatCut
 
 A desktop tool that takes your music + a pile of video clips, cuts the clips to
@@ -125,7 +127,8 @@ In Premiere, use File ▸ Import on the exported `.xml`.
   ntsc flag but aren't validated), cross-OS `file://` URLs (see `to_file_url` in
   fcp7xml.rs), media characteristics in `<file>` to cut relink prompts, and
   bundling Python as a frozen sidecar so users don't need a venv.
-- **Packaging** (Phase 5): the app icons are placeholders; no signed builds yet.
+- **Packaging** (Phase 5): no signed builds yet. (The app icon is generated
+  from `app-icon.png` with `npx tauri icon app-icon.png`.)
 - Also open, not yet planned: stereo / multi-channel audio (currently one audio
   clipitem per file on a single track), downbeat-aware cuts, drag-to-reorder,
   zoom, waveform rendering.
